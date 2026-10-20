@@ -29,14 +29,14 @@ class DayflowApp extends ConsumerWidget {
   }
 }
 
-class MainShell extends StatefulWidget {
+class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
 
   @override
-  State<MainShell> createState() => _MainShellState();
+  ConsumerState<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends ConsumerState<MainShell> {
   int index = 0;
 
   @override
@@ -51,16 +51,21 @@ class _MainShellState extends State<MainShell> {
 
     return Scaffold(
       body: SafeArea(
-        child: IndexedStack(index: index, children: pages),
+        child: IndexedStack(
+          index: index,
+          children: pages,
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         tooltip: 'Create new item',
-        onPressed: () => _createItem(context),
+        onPressed: _createItem,
         child: const Icon(Icons.add),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: index,
-        onDestinationSelected: (value) => setState(() => index = value),
+        onDestinationSelected: (value) {
+          setState(() => index = value);
+        },
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.home_outlined),
@@ -92,11 +97,11 @@ class _MainShellState extends State<MainShell> {
     );
   }
 
-  Future<void> _createItem(BuildContext context) async {
+  Future<void> _createItem() async {
     final type = await showModalBottomSheet<ItemType>(
       context: context,
       showDragHandle: true,
-      builder: (context) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -110,7 +115,7 @@ class _MainShellState extends State<MainShell> {
               ListTile(
                 leading: Icon(item.$3),
                 title: Text(item.$2),
-                onTap: () => Navigator.pop(context, item.$1),
+                onTap: () => Navigator.pop(sheetContext, item.$1),
               ),
             const SizedBox(height: 12),
           ],
@@ -121,34 +126,46 @@ class _MainShellState extends State<MainShell> {
     if (!mounted || type == null) return;
 
     final titleController = TextEditingController();
+    final descriptionController = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
     try {
-      final title = await showDialog<String>(
+      final result = await showDialog<(String, String)>(
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: Text('Create ${type.name}'),
           content: Form(
             key: formKey,
-            child: TextFormField(
-              controller: titleController,
-              autofocus: true,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(labelText: 'Title'),
-              validator: (value) {
-                if (value == null || value.trim().isEmpty) {
-                  return 'Enter a title';
-                }
-                return null;
-              },
-              onFieldSubmitted: (_) {
-                if (formKey.currentState?.validate() ?? false) {
-                  Navigator.pop(
-                    dialogContext,
-                    titleController.text.trim(),
-                  );
-                }
-              },
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: titleController,
+                    autofocus: true,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: const InputDecoration(
+                      labelText: 'Title',
+                      hintText: 'What do you want to organize?',
+                    ),
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Enter a title';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: descriptionController,
+                    textCapitalization: TextCapitalization.sentences,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Description (optional)',
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -161,7 +178,10 @@ class _MainShellState extends State<MainShell> {
                 if (formKey.currentState?.validate() ?? false) {
                   Navigator.pop(
                     dialogContext,
-                    titleController.text.trim(),
+                    (
+                      titleController.text.trim(),
+                      descriptionController.text.trim(),
+                    ),
                   );
                 }
               },
@@ -171,26 +191,28 @@ class _MainShellState extends State<MainShell> {
         ),
       );
 
-      if (!mounted || title == null) return;
+      if (!mounted || result == null) return;
 
       await ref.read(organizerProvider.notifier).add(
             type: type,
-            title: title,
+            title: result.$1,
+            description: result.$2,
           );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${type.name} created')),
-        );
-      }
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${type.name} created')),
+      );
     } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not save item: $error')),
-        );
-      }
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save item: $error')),
+      );
     } finally {
       titleController.dispose();
+      descriptionController.dispose();
     }
   }
 }
@@ -204,6 +226,7 @@ class HomeTab extends ConsumerWidget {
     final tasks = state.items
         .where((item) => item.type == ItemType.task)
         .toList();
+
     final completed = tasks.where((item) => item.completed).length;
     final now = DateTime.now();
 
@@ -217,7 +240,11 @@ class HomeTab extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.auto_awesome, size: 32),
+                Icon(
+                  Icons.auto_awesome,
+                  size: 32,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
                 const SizedBox(height: 16),
                 Text(
                   '${now.day}/${now.month}/${now.year}',
@@ -238,7 +265,7 @@ class HomeTab extends ConsumerWidget {
             ),
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 24),
         Text(
           'Your latest items',
           style: Theme.of(context).textTheme.titleLarge,
@@ -253,11 +280,15 @@ class HomeTab extends ConsumerWidget {
             subtitle: 'Tap + to create your first item.',
           )
         else
-          ...state.items.take(10).map((item) => _ItemCard(item: item)),
+          ...state.items.reversed.take(10).map(
+                (item) => _ItemCard(item: item),
+              ),
         if (state.error != null)
           Text(
             state.error!,
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.error,
+            ),
           ),
       ],
     );
@@ -282,8 +313,11 @@ class _CalendarTabState extends ConsumerState<CalendarTab> {
 
   @override
   Widget build(BuildContext context) {
-    final items = ref.watch(organizerProvider).items.where((item) {
+    final state = ref.watch(organizerProvider);
+
+    final items = state.items.where((item) {
       final date = item.dueAt;
+
       return date != null &&
           date.year == selected.year &&
           date.month == selected.month &&
@@ -299,20 +333,25 @@ class _CalendarTabState extends ConsumerState<CalendarTab> {
             initialDate: selected,
             firstDate: DateTime(2000),
             lastDate: DateTime(2100),
-            onDateChanged: (date) => setState(() => selected = date),
+            onDateChanged: (date) {
+              setState(() => selected = date);
+            },
           ),
         ),
         const SizedBox(height: 16),
         Text(
-          '${selected.day}/${selected.month}/${selected.year}',
+          'Plans for ${selected.day}/${selected.month}/${selected.year}',
           style: Theme.of(context).textTheme.titleLarge,
         ),
         const SizedBox(height: 8),
-        if (items.isEmpty)
+        if (state.loading)
+          const Center(child: CircularProgressIndicator())
+        else if (items.isEmpty)
           const _EmptyState(
             icon: Icons.event_note,
             title: 'Nothing scheduled',
-            subtitle: 'Create an item using the + button.',
+            subtitle:
+                'Items will appear here when they have a date assigned.',
           )
         else
           ...items.map((item) => _ItemCard(item: item)),
@@ -326,22 +365,26 @@ class TasksTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final tasks = ref.watch(organizerProvider).items
+    final state = ref.watch(organizerProvider);
+    final tasks = state.items
         .where((item) => item.type == ItemType.task)
         .toList();
 
     return _Page(
       title: 'Tasks',
       subtitle: '${tasks.where((item) => !item.completed).length} remaining',
-      children: tasks.isEmpty
-          ? const [
-              _EmptyState(
-                icon: Icons.check_circle_outline,
-                title: 'Nothing on your list',
-                subtitle: 'Create a task with the + button.',
-              ),
-            ]
-          : tasks.map((item) => _ItemCard(item: item)).toList(),
+      children: [
+        if (state.loading)
+          const Center(child: CircularProgressIndicator())
+        else if (tasks.isEmpty)
+          const _EmptyState(
+            icon: Icons.check_circle_outline,
+            title: 'Nothing on your list',
+            subtitle: 'Create a task with the + button.',
+          )
+        else
+          ...tasks.map((item) => _ItemCard(item: item)),
+      ],
     );
   }
 }
@@ -351,22 +394,26 @@ class HabitsTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final habits = ref.watch(organizerProvider).items
+    final state = ref.watch(organizerProvider);
+    final habits = state.items
         .where((item) => item.type == ItemType.habit)
         .toList();
 
     return _Page(
       title: 'Habits',
       subtitle: 'Build consistency, one day at a time.',
-      children: habits.isEmpty
-          ? const [
-              _EmptyState(
-                icon: Icons.spa_outlined,
-                title: 'Start a new habit',
-                subtitle: 'Create your first habit with +.',
-              ),
-            ]
-          : habits.map((item) => _ItemCard(item: item)).toList(),
+      children: [
+        if (state.loading)
+          const Center(child: CircularProgressIndicator())
+        else if (habits.isEmpty)
+          const _EmptyState(
+            icon: Icons.spa_outlined,
+            title: 'Start a new habit',
+            subtitle: 'Create your first habit with +.',
+          )
+        else
+          ...habits.map((item) => _ItemCard(item: item)),
+      ],
     );
   }
 }
@@ -383,27 +430,37 @@ class SettingsTab extends ConsumerWidget {
       subtitle: 'Personalize your experience.',
       children: [
         Card(
-          child: Column(
-            children: [
-              const ListTile(
-                leading: Icon(Icons.palette_outlined),
-                title: Text('Appearance'),
-                subtitle: Text('Choose your preferred theme'),
-              ),
-              for (final mode in ['system', 'light', 'dark'])
-                RadioListTile<String>(
-                  value: mode,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const ListTile(
+                  leading: Icon(Icons.palette_outlined),
+                  title: Text('Appearance'),
+                  subtitle: Text('Choose your preferred theme'),
+                ),
+                RadioGroup<String>(
                   groupValue: selectedTheme,
-                  title: Text(
-                    '${mode[0].toUpperCase()}${mode.substring(1)} mode',
-                  ),
                   onChanged: (value) {
                     if (value != null) {
                       ref.read(themeModeProvider.notifier).state = value;
                     }
                   },
+                  child: Column(
+                    children: [
+                      for (final mode in ['system', 'light', 'dark'])
+                        RadioListTile<String>(
+                          value: mode,
+                          title: Text(
+                            '${mode[0].toUpperCase()}${mode.substring(1)} mode',
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-            ],
+              ],
+            ),
           ),
         ),
         const Card(
@@ -484,7 +541,10 @@ class _EmptyState extends StatelessWidget {
           children: [
             Icon(icon, size: 36),
             const SizedBox(height: 12),
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 6),
             Text(subtitle, textAlign: TextAlign.center),
           ],
@@ -501,6 +561,8 @@ class _ItemCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final date = item.dueAt;
+
     return Card(
       child: ListTile(
         leading: Checkbox(
@@ -509,24 +571,27 @@ class _ItemCard extends ConsumerWidget {
             try {
               await ref.read(organizerProvider.notifier).toggle(item.id);
             } catch (_) {
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Could not save change.')),
-                );
-              }
+              if (!context.mounted) return;
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Could not save change.'),
+                ),
+              );
             }
           },
         ),
         title: Text(
           item.title,
           style: TextStyle(
-            decoration: item.completed ? TextDecoration.lineThrough : null,
+            decoration:
+                item.completed ? TextDecoration.lineThrough : null,
           ),
         ),
         subtitle: Text(
-          item.dueAt == null
+          date == null
               ? item.type.name
-              : '${item.type.name} • ${item.dueAt!.day}/${item.dueAt!.month}/${item.dueAt!.year}',
+              : '${item.type.name} • ${date.day}/${date.month}/${date.year}',
         ),
         trailing: IconButton(
           tooltip: 'Delete',
@@ -550,16 +615,18 @@ class _ItemCard extends ConsumerWidget {
               ),
             );
 
-            if (confirm == true && context.mounted) {
-              try {
-                await ref.read(organizerProvider.notifier).delete(item.id);
-              } catch (_) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Could not delete item.')),
-                  );
-                }
-              }
+            if (confirm != true || !context.mounted) return;
+
+            try {
+              await ref.read(organizerProvider.notifier).delete(item.id);
+            } catch (_) {
+              if (!context.mounted) return;
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Could not delete item.'),
+                ),
+              );
             }
           },
         ),
